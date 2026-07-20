@@ -131,6 +131,7 @@ html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hi
 
                 ws.onopen = function () {
                     setStatus('');
+                    scrollMode = false; scrollOffset = 0; /* fresh attach = live view */
                     ws.send(enc.encode(JSON.stringify({
                         AuthToken: (data && data.token) || '',
                         columns: term.cols,
@@ -186,7 +187,7 @@ html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hi
         return data;
     }
 
-    term.onData(function (d) { sendInput(applySticky(d)); });
+    term.onData(function (d) { d = applySticky(d); trackInput(d); sendInput(d); });
     term.onBinary(sendBinary);
     term.onResize(sendResize);
 
@@ -248,14 +249,128 @@ html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hi
     }
 
     var P = '\x02'; /* Ctrl+B — psmux prefix */
+
+    /* --- wheel / touch scrolling bridged to psmux copy-mode ---
+       psmux keeps the terminal in the alternate buffer and owns its scrollback, so
+       xterm's own viewport never has history to scroll (and ConPTY on Win10 drops VT
+       mouse events, so psmux's `mouse on` can't help — psmux/psmux#360). Instead:
+       scroll up enters copy-mode (prefix+[) and sends Up arrows; scroll down sends
+       Down arrows and auto-exits ('q') once we're back at the live bottom. */
+    var scrollMode = false;   /* our belief: psmux copy-mode is active */
+    var scrollOffset = 0;     /* approx lines scrolled above the live bottom */
+
+    /* input that enters/leaves copy-mode by other routes (Scroll button, typed q/Esc,
+       Enter/y yank-exit) keeps the flag honest */
+    function trackInput(d) {
+        if (d.indexOf(P + '[') !== -1) { scrollMode = true; scrollOffset = 0; }
+        else if (scrollMode && (d === 'q' || d === '\x1b' || d === '\r' || d === 'y' || d === '\x03')) {
+            scrollMode = false; scrollOffset = 0;
+        }
+    }
+
+    function cellPx() {
+        try {
+            var h = term._core._renderService.dimensions.css.cell.height;
+            if (h > 0) return h;
+        } catch (e) { }
+        return term.options.fontSize * 1.4;
+    }
+
+    /* n > 0 scrolls up into history, n < 0 back down toward live */
+    function scrollLines(n) {
+        var seq = '';
+        if (n > 0) {
+            if (!scrollMode) { scrollMode = true; scrollOffset = 0; sendInput(P + '['); }
+            n = Math.min(n, 120);
+            scrollOffset += n;
+            while (n-- > 0) seq += arrowSeq('A');
+            sendInput(seq);
+        } else if (n < 0 && scrollMode) {
+            n = Math.min(-n, 120);
+            while (n-- > 0 && scrollOffset > 0) { scrollOffset--; seq += arrowSeq('B'); }
+            if (seq) sendInput(seq);
+            if (scrollOffset <= 0) { scrollMode = false; scrollOffset = 0; sendInput('q'); }
+        }
+    }
+
+    var wheelRem = 0;
+    /* NOTE: no alternate-buffer check — ConPTY repaints psmux on the NORMAL buffer
+       (verified: no ?1049h ever reaches the browser), so xterm's own scrollback is
+       always empty and the bridge must handle every scroll. */
+    term.attachCustomWheelEventHandler(function (ev) {
+        if (ev.ctrlKey) return true; /* pinch/ctrl zoom */
+        var px = ev.deltaY;
+        if (ev.deltaMode === 1) px *= cellPx();
+        else if (ev.deltaMode === 2) px *= term.rows * cellPx();
+        wheelRem += px;
+        var lines = (wheelRem / cellPx()) | 0;
+        if (lines) { wheelRem -= lines * cellPx(); scrollLines(-lines); }
+        ev.preventDefault();
+        return false;
+    });
+
+    /* touch drag scrolls like a web page (finger down = older history), with a fling */
+    var termEl = document.getElementById('term');
+    var tY = null, tMoved = false, tRem = 0, tVel = 0, tLast = 0, flingTimer = null;
+    termEl.addEventListener('touchstart', function (e) {
+        if (flingTimer) { cancelAnimationFrame(flingTimer); flingTimer = null; }
+        if (e.touches.length === 1) {
+            tY = e.touches[0].clientY; tMoved = false; tRem = 0; tVel = 0; tLast = e.timeStamp;
+        } else tY = null;
+    }, { capture: true, passive: true });
+    termEl.addEventListener('touchmove', function (e) {
+        if (tY === null || e.touches.length !== 1) return;
+        var y = e.touches[0].clientY;
+        var dy = y - tY;
+        tY = y;
+        tRem += dy;
+        var dt = e.timeStamp - tLast; tLast = e.timeStamp;
+        if (dt > 0) tVel = 0.8 * tVel + 0.2 * (dy / dt);
+        if (!tMoved && Math.abs(tRem) < 6) return; /* still just a tap */
+        tMoved = true;
+        e.preventDefault();  /* keep the browser/xterm from also reacting to the drag */
+        e.stopPropagation();
+        var lines = (tRem / cellPx()) | 0;
+        if (lines) { tRem -= lines * cellPx(); scrollLines(lines); }
+    }, { capture: true, passive: false });
+    termEl.addEventListener('touchend', function () {
+        if (tY === null) return;
+        tY = null;
+        if (!tMoved) return;
+        var v = tVel * 16; /* px per ~frame */
+        var rem = 0;
+        function step() {
+            v *= 0.94;
+            if (Math.abs(v) < 1) { flingTimer = null; return; }
+            rem += v;
+            var lines = (rem / cellPx()) | 0;
+            if (lines) { rem -= lines * cellPx(); scrollLines(lines); }
+            flingTimer = requestAnimationFrame(step);
+        }
+        flingTimer = requestAnimationFrame(step);
+    }, { capture: true, passive: true });
+    termEl.addEventListener('touchcancel', function () { tY = null; }, { capture: true, passive: true });
+
+    /* create a session via the psmux command prompt (prefix+: opens it, \r runs it) */
+    function newSession() {
+        var name = window.prompt('New session name (blank = auto):');
+        if (name === null) return; /* cancelled */
+        name = name.trim().replace(/\s+/g, '-').replace(/[^\w-]/g, '');
+        var cmd = name ? 'new-session -s ' + name : 'new-session';
+        sendInput(P + ':' + cmd + '\r');
+        term.focus();
+    }
     var ROWS = [
         [
             { label: 'Win ▶', seq: P + 'n', title: 'Next window' },
             { label: '◀ Win', seq: P + 'p', title: 'Previous window' },
+            { label: '+ Win', seq: P + 'c', title: 'New window' },
+            { label: 'Sess ▶', seq: P + ')', title: 'Next session' },
+            { label: '◀ Sess', seq: P + '(', title: 'Previous session' },
             { label: 'Sessions', seq: P + 's', title: 'Session chooser' },
+            { label: '+ Sess', action: newSession, title: 'New session (asks for a name)' },
             { label: 'Rename', seq: P + '$', title: 'Rename session (type name, Enter)' },
             { label: 'Cmd :', seq: P + ':', title: 'psmux command prompt' },
-            { label: 'New Win', seq: P + 'c', title: 'New window' },
             { label: 'Scroll', seq: P + '[', title: 'Copy/scroll mode (q to exit)' },
             { label: 'A−', action: fontDown, title: 'Smaller font' },
             { label: 'A+', action: fontUp, title: 'Larger font' }
@@ -290,7 +405,7 @@ html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hi
             var act = function () {
                 if (spec.action) spec.action(b);
                 else if (spec.arrow) sendInput(arrowSeq(spec.arrow));
-                else if (spec.seq) sendInput(spec.seq);
+                else if (spec.seq) { trackInput(spec.seq); sendInput(spec.seq); }
             };
             /* touchstart/mousedown preventDefault keeps focus on the terminal so the
                mobile keyboard stays open while tapping buttons */
