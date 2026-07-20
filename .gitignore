@@ -1,0 +1,8 @@
+# Credentials / secrets — never commit
+.ttyd_credential
+H_bitlocker_recovery_*.txt
+
+# Runtime logs
+watchdog.log
+switchover.log
+*.log

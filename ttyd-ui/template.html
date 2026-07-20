@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
+<title>Terminal</title>
+<style>
+@@XTERM_CSS@@
+</style>
+<style>
+html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+#app { position: relative; display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
+#term { flex: 1 1 auto; min-height: 0; padding: 2px 0 2px 4px; }
+#toolbar { flex: none; background: #141414; border-top: 1px solid #2c2c2c; padding-bottom: env(safe-area-inset-bottom); }
+.btn-row { display: flex; gap: 5px; overflow-x: auto; padding: 5px 6px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.btn-row::-webkit-scrollbar { display: none; }
+.btn-row button {
+    flex: 0 0 auto; background: #232323; color: #d6d6d6;
+    border: 1px solid #3a3a3a; border-radius: 7px;
+    font: 600 12px -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 8px 11px; min-width: 42px; white-space: nowrap; cursor: pointer;
+    touch-action: manipulation; user-select: none; -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+.btn-row button:active { background: #3d3d3d; }
+.btn-row button.active { background: #0a3d2c; border-color: #00ffa3; color: #00ffa3; }
+#status {
+    position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 10;
+    background: rgba(180, 30, 30, 0.9); color: #fff; font: 12px sans-serif;
+    padding: 4px 12px; border-radius: 12px; display: none;
+}
+</style>
+</head>
+<body>
+<div id="app">
+    <div id="status"></div>
+    <div id="term"></div>
+    <div id="toolbar"></div>
+</div>
+<script>
+@@XTERM_JS@@
+</script>
+<script>
+@@FIT_JS@@
+</script>
+<script>
+@@CLIENT_JS@@
+</script>
+</body>
+</html>
