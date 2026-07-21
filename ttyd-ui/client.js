@@ -58,6 +58,9 @@
             .catch(function () { return { token: '' }; })
             .then(function (data) {
                 var proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+                /* location.search passes through to the ws URL — with ttyd -a,
+                   opening the page as /?arg=<session> forces a psmux session
+                   (see attach-web.ps1) */
                 var ws = new WebSocket(proto + location.host + basePath + 'ws' + location.search, ['tty']);
                 ws.binaryType = 'arraybuffer';
                 socket = ws;
@@ -318,11 +321,13 @@
             { label: 'Win ▶', seq: P + 'n', title: 'Next window' },
             { label: '◀ Win', seq: P + 'p', title: 'Previous window' },
             { label: '+ Win', seq: P + 'c', title: 'New window' },
+            { label: 'Windows', seq: P + 'w', title: 'Window chooser' },
+            { label: 'Ren Win', seq: P + ',', title: 'Rename window (type name, Enter)' },
             { label: 'Sess ▶', seq: P + ')', title: 'Next session' },
             { label: '◀ Sess', seq: P + '(', title: 'Previous session' },
             { label: 'Sessions', seq: P + 's', title: 'Session chooser' },
             { label: '+ Sess', action: newSession, title: 'New session (asks for a name)' },
-            { label: 'Rename', seq: P + '$', title: 'Rename session (type name, Enter)' },
+            { label: 'Ren Sess', seq: P + '$', title: 'Rename session (type name, Enter)' },
             { label: 'Cmd :', seq: P + ':', title: 'psmux command prompt' },
             { label: 'Scroll', seq: P + '[', title: 'Copy/scroll mode (q to exit)' },
             { label: 'A−', action: fontDown, title: 'Smaller font' },
@@ -361,9 +366,23 @@
                 else if (spec.arrow) sendInput(arrowSeq(spec.arrow));
                 else if (spec.seq) { trackInput(spec.seq); sendInput(spec.seq); }
             };
-            /* touchstart/mousedown preventDefault keeps focus on the terminal so the
-               mobile keyboard stays open while tapping buttons */
-            b.addEventListener('touchstart', function (e) { e.preventDefault(); act(); }, { passive: false });
+            /* Touch: fire on touchEND, and only if the finger didn't move — a moving
+               finger is the row's horizontal swipe-scroll, which must stay native
+               (the old preventDefault-on-touchstart killed swiping entirely).
+               preventDefault on touchend stops the synthetic click AND keeps focus
+               on the terminal so the mobile keyboard stays open. */
+            var bx = 0, by = 0, bMoved = false;
+            b.addEventListener('touchstart', function (e) {
+                var t = e.touches[0];
+                bx = t.clientX; by = t.clientY; bMoved = false;
+            }, { passive: true });
+            b.addEventListener('touchmove', function (e) {
+                var t = e.touches[0];
+                if (Math.abs(t.clientX - bx) > 8 || Math.abs(t.clientY - by) > 8) bMoved = true;
+            }, { passive: true });
+            b.addEventListener('touchend', function (e) {
+                if (!bMoved) { e.preventDefault(); act(); }
+            }, { passive: false });
             b.addEventListener('mousedown', function (e) { e.preventDefault(); });
             b.addEventListener('click', function () { act(); });
             rowEl.appendChild(b);

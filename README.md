@@ -21,7 +21,7 @@ flowchart LR
 | 🌐 **ttyd** | Turns a terminal into a web page | Bound to `127.0.0.1` — invisible to your network |
 | 🧵 **psmux / screen** | Keeps the shell session alive forever | Refresh the page, switch devices — same session |
 
-Every browser tab attaches to the **same** persistent session, so your phone and laptop literally look at the same screen.
+Every browser tab attaches to the **same** persistent session, so your phone and laptop literally look at the same screen. On Windows, a refresh reattaches to the session you were **last using** (psmux keeps a current-session pointer; `attach-web.ps1` asks for it) — and you can force one with `/?arg=<session>` in the URL.
 
 ## ⚡ Quick start
 
@@ -85,9 +85,9 @@ The page (`ttyd-index.html` / `ttyd-index-screen.html`) is a single self-contain
 | Button | What it does (🪟 psmux / 🐧 screen) |
 |---|---|
 | `Win ▶` `◀ Win` `+ Win` | Next / previous / new window |
-| `Sess ▶` `◀ Sess` `Sessions` `+ Sess` | Switch, list, and create sessions *(psmux only)* |
-| `Windows` | Window chooser *(screen only)* |
-| `Rename` | Rename session (psmux) / window (screen) |
+| `Windows` | Window chooser |
+| `Ren Win` | Rename the current window |
+| `Sess ▶` `◀ Sess` `Sessions` `+ Sess` `Ren Sess` | Switch, list, create, rename sessions *(psmux only)* |
 | `Cmd :` | The multiplexer's command prompt |
 | `Scroll` | Enter copy/scroll mode by hand |
 | `A−` `A+` | Font size (remembered on your device) |
@@ -122,6 +122,7 @@ Mouse wheel, touch drag, and fling all work, with **20,000 lines** of history. I
 | File | What it is |
 |---|---|
 | `start_web_terminal.ps1` | 🪟 launcher: keep-alive loop, env-var hygiene, psmux session |
+| `attach-web.ps1` | 🪟 per-connection attach: lands on your last-used session |
 | `watchdog_web_terminal.ps1` + `run-*-hidden.vbs` | 🪟 self-healing scheduled-task pieces |
 | `linux/start-web-terminal.sh` | 🐧 launcher: keep-alive loop, env-var hygiene |
 | `linux/attach-main.sh` | 🐧 per-connection attach (creates session if missing) |

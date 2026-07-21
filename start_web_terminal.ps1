@@ -58,11 +58,12 @@ if (Test-Path 'C:\Users\admin\web-terminal\ttyd-index.html') {
 }
 
 # Keep-alive: relaunch ttyd if it ever exits. Each browser connection runs
-# 'psmux new-session -A -s main' -> attaches to the SAME session (refresh-safe).
+# attach-web.ps1, which attaches to the session that client last used (the
+# page sends it via ?arg=, allowed by -a) and falls back to 'main'.
 while ($true) {
-    ttyd -p 7681 -i 127.0.0.1 -W -t fontSize=15 -t cursorBlink=true `
+    ttyd -p 7681 -i 127.0.0.1 -W -a -t fontSize=15 -t cursorBlink=true `
          -t 'disableLeaveAlert=true' -t 'scrollback=20000' `
          @indexArgs `
-         psmux new-session -A -s main
+         powershell -NoProfile -ExecutionPolicy Bypass -File C:\Users\admin\web-terminal\attach-web.ps1
     Start-Sleep -Seconds 2
 }
