@@ -1,0 +1,5 @@
+# Linux-side files must check out with LF endings even on Windows,
+# or bash/screen/systemd will choke on CRLF.
+*.sh            text eol=lf
+linux/screenrc  text eol=lf
+*.service       text eol=lf

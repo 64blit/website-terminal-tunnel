@@ -1,0 +1,20 @@
+# screenrc for the web terminal's persistent "main" session
+# (loaded by attach-main.sh via `screen -c`; your ~/.screenrc is not used).
+
+startup_message off
+vbell off
+
+# 20k lines of history for the browser scroll bridge (matches the client's
+# scrollback setting and the psmux config on the Windows side).
+defscrollback 20000
+
+# Let full-screen apps (vim, htop) use the alternate screen and restore the
+# shell view when they exit.
+altscreen on
+
+term screen-256color
+
+# Status line: window tabs on the left, clock on the right — the closest
+# match to psmux's status bar so both platforms feel the same in the browser.
+hardstatus alwayslastline
+hardstatus string '%{= kG}[main] %{= kw}%-w%{= gk}%n %t%{-}%+w %=%{= kG}%c'

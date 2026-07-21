@@ -12,6 +12,13 @@ $html = $html.Replace('@@XTERM_JS@@',  [IO.File]::ReadAllText("$dir\vendor\xterm
 $html = $html.Replace('@@FIT_JS@@',    [IO.File]::ReadAllText("$dir\vendor\addon-fit.min.js"))
 $html = $html.Replace('@@CLIENT_JS@@', [IO.File]::ReadAllText("$dir\client.js"))
 
-$out = Join-Path (Split-Path -Parent $dir) 'ttyd-index.html'
-[IO.File]::WriteAllText($out, $html, (New-Object System.Text.UTF8Encoding($false)))
-Write-Host "Built $out ($([math]::Round((Get-Item $out).Length / 1KB)) KB)"
+# Two builds from one client: @@MUX@@ selects the multiplexer dialect
+# (prefix key, copy-mode keys, toolbar rows). See linux/ for the screen side.
+$root = Split-Path -Parent $dir
+foreach ($build in @(@{ mux = 'psmux'; file = 'ttyd-index.html' },
+                     @{ mux = 'screen'; file = 'ttyd-index-screen.html' })) {
+    $out = Join-Path $root $build.file
+    [IO.File]::WriteAllText($out, $html.Replace('@@MUX@@', $build.mux),
+        (New-Object System.Text.UTF8Encoding($false)))
+    Write-Host "Built $out ($([math]::Round((Get-Item $out).Length / 1KB)) KB)"
+}

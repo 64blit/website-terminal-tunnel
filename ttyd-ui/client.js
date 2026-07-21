@@ -181,7 +181,12 @@
         }
     }
 
-    var P = '\x02'; /* Ctrl+B — psmux prefix */
+    /* One client, two multiplexers — window.TTYD_MUX is stamped by the build:
+       psmux (Windows): prefix Ctrl+B, copy-mode exits with q.
+       GNU screen (Linux): prefix Ctrl+A, copy-mode exits with Esc. */
+    var SCREEN = (window.TTYD_MUX === 'screen');
+    var P = SCREEN ? '\x01' : '\x02';
+    var COPY_EXIT = SCREEN ? '\x1b' : 'q';
 
     /* --- wheel / touch scrolling bridged to psmux copy-mode ---
        psmux keeps the terminal in the alternate buffer and owns its scrollback, so
@@ -196,7 +201,9 @@
        Enter/y yank-exit) keeps the flag honest */
     function trackInput(d) {
         if (d.indexOf(P + '[') !== -1) { scrollMode = true; scrollOffset = 0; }
-        else if (scrollMode && (d === 'q' || d === '\x1b' || d === '\r' || d === 'y' || d === '\x03')) {
+        else if (scrollMode && (SCREEN
+            ? (d === '\x1b' || d === '\r')
+            : (d === 'q' || d === '\x1b' || d === '\r' || d === 'y' || d === '\x03'))) {
             scrollMode = false; scrollOffset = 0;
         }
     }
@@ -222,7 +229,7 @@
             n = Math.min(-n, 120);
             while (n-- > 0 && scrollOffset > 0) { scrollOffset--; seq += arrowSeq('B'); }
             if (seq) sendInput(seq);
-            if (scrollOffset <= 0) { scrollMode = false; scrollOffset = 0; sendInput('q'); }
+            if (scrollOffset <= 0) { scrollMode = false; scrollOffset = 0; sendInput(COPY_EXIT); }
         }
     }
 
@@ -232,6 +239,9 @@
        always empty and the bridge must handle every scroll. */
     term.attachCustomWheelEventHandler(function (ev) {
         if (ev.ctrlKey) return true; /* pinch/ctrl zoom */
+        /* an app (vim, htop) turned on mouse tracking: let xterm report the wheel to it.
+           Never happens through Win10 ConPTY, but works on Linux ptys. */
+        try { if (term.modes.mouseTrackingMode !== 'none') return true; } catch (e) { }
         var px = ev.deltaY;
         if (ev.deltaMode === 1) px *= cellPx();
         else if (ev.deltaMode === 2) px *= term.rows * cellPx();
@@ -294,7 +304,17 @@
         term.focus();
     }
     var ROWS = [
-        [
+        SCREEN ? [
+            { label: 'Win ▶', seq: P + 'n', title: 'Next window' },
+            { label: '◀ Win', seq: P + 'p', title: 'Previous window' },
+            { label: '+ Win', seq: P + 'c', title: 'New window' },
+            { label: 'Windows', seq: P + '"', title: 'Window chooser' },
+            { label: 'Rename', seq: P + 'A', title: 'Rename window (type name, Enter)' },
+            { label: 'Cmd :', seq: P + ':', title: 'screen command prompt' },
+            { label: 'Scroll', seq: P + '[', title: 'Copy/scroll mode (Esc to exit)' },
+            { label: 'A−', action: fontDown, title: 'Smaller font' },
+            { label: 'A+', action: fontUp, title: 'Larger font' }
+        ] : [
             { label: 'Win ▶', seq: P + 'n', title: 'Next window' },
             { label: '◀ Win', seq: P + 'p', title: 'Previous window' },
             { label: '+ Win', seq: P + 'c', title: 'New window' },
@@ -313,7 +333,8 @@
             { label: 'Tab', seq: '\t' },
             { label: 'Ctrl', action: toggleCtrl, sticky: true, title: 'Ctrl + next typed key' },
             { label: '^C', seq: '\x03', title: 'Interrupt' },
-            { label: '^A', seq: '\x01' },
+            /* under screen a literal Ctrl+A must be sent as prefix+a */
+            SCREEN ? { label: '^A', seq: P + 'a', title: 'Literal Ctrl+A' } : { label: '^A', seq: '\x01' },
             { label: '↑', arrow: 'A' },
             { label: '↓', arrow: 'B' },
             { label: '←', arrow: 'D' },

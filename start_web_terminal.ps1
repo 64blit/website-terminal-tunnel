@@ -1,7 +1,7 @@
 # start_web_terminal.ps1 — ttyd (web terminal) -> psmux 'main' persistent PowerShell session.
 # Binds ttyd to 127.0.0.1 ONLY. Internet exposure is gated by Cloudflare Access on
-# the tunnel hostname (email allowlist) — no app-level password;
-# unauthenticated requests are stopped at Cloudflare's edge before they reach ttyd.
+# the tunnel hostname (email allowlist) — no app-level password; unauthenticated
+# requests are stopped at Cloudflare's edge before they reach ttyd.
 # Runs ttyd in a keep-alive loop. Auto-started + auto-recovered by the
 # 'web-terminal-keepalive' scheduled task (at logon + every 5 min); the guard
 # below makes extra launches exit immediately, so the task can fire freely.
