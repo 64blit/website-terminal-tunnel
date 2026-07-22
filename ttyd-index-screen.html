@@ -151,6 +151,7 @@ html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hi
                     var payload = raw.subarray(1);
                     if (cmd === '0') {
                         term.write(payload);
+                        if (!SCREEN) scanForCopyBuf(payload);
                     } else if (cmd === '1') {
                         document.title = dec.decode(payload);
                     } else if (cmd === '2') {
@@ -195,7 +196,45 @@ html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hi
     term.onBinary(sendBinary);
     term.onResize(sendResize);
 
-    /* OSC 52: if psmux copy-mode yank forwards the buffer, mirror it to the device clipboard */
+    /* --- 'Copy buf' pipeline: copybuf.ps1 prints the psmux yank buffer as
+       ##CB64[<base64>]CB64## in plain text (Win10 ConPTY destroys OSC52, so
+       this is the only route). We scan the raw output stream, strip the escape
+       sequences and wrapping the terminal interleaves, decode, and write the
+       device clipboard. If the browser demands a user gesture, the payload is
+       parked and the Copy button finishes the job. */
+    var dec1 = new TextDecoder('latin1');
+    var cbAcc = '';
+    var cbParked = null;
+    function cbNote(msg) {
+        setStatus(msg);
+        setTimeout(function () { if (statusEl.textContent === msg) setStatus(''); }, 2500);
+    }
+    function scanForCopyBuf(payload) {
+        cbAcc += dec1.decode(payload);
+        if (cbAcc.length > 1048576) cbAcc = cbAcc.slice(-524288);
+        var start = cbAcc.indexOf('##CB64[');
+        if (start < 0) return;
+        var end = cbAcc.indexOf(']CB64##', start + 7);
+        if (end < 0) return;
+        var raw = cbAcc.slice(start + 7, end);
+        cbAcc = cbAcc.slice(end + 7);
+        /* the terminal interleaves SGR/cursor sequences and line wraps into
+           long printed runs — remove everything that isn't base64 */
+        raw = raw.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+                 .replace(/\x1b\[[0-9;?& ]*[A-Za-z@]/g, '')
+                 .replace(/[^A-Za-z0-9+/=]/g, '');
+        try {
+            var bytes = Uint8Array.from(atob(raw), function (ch) { return ch.charCodeAt(0); });
+            var text = dec.decode(bytes);
+            navigator.clipboard.writeText(text).then(
+                function () { cbNote('copied ' + text.length + ' chars ✓'); },
+                function () { cbParked = text; cbNote('tap Copy to finish (' + text.length + ' chars)'); }
+            );
+        } catch (e) { cbNote('copy failed to decode'); }
+    }
+
+    /* OSC 52: if the mux forwards the yank buffer (works on Linux ptys;
+       Win10 ConPTY destroys it), mirror it to the device clipboard */
     term.parser.registerOscHandler(52, function (data) {
         var idx = data.indexOf(';');
         if (idx >= 0) {
@@ -230,21 +269,48 @@ html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hi
         setTimeout(function () { btn.textContent = old; }, 800);
     }
     function doCopy(btn) {
-        var sel = term.getSelection();
+        /* a parked Copy-buf payload (clipboard write needed a user gesture) wins */
+        var sel = cbParked || term.getSelection();
+        cbParked = null;
         if (!sel) { flash(btn, 'select!'); return; }
         navigator.clipboard.writeText(sel).then(
             function () { flash(btn, '✓'); },
             function () { flash(btn, '✗'); }
         );
     }
+    /* Paste in small ws messages: one big frame dies wholesale past ~8KB on
+       localhost (and far sooner through Cloudflare's ws re-framing — that was
+       the "only ~200 chars paste" bug). Every chunk is a COMPLETE bracketed
+       paste: bracket state must never span messages, because a connection
+       drop between an open and close marker wedges the pane's input path in
+       psmux for good. Chunk boundaries avoid splitting surrogate pairs. */
+    /* 512B/40ms is measured: 8ms pacing gets silently discarded by the
+       Windows chain; 40ms delivers 20KB pastes losslessly (~13KB/s) */
+    var PASTE_CHUNK = 512, PASTE_DELAY = 40;
+    function pasteText(t) {
+        if (!t) return;
+        t = t.replace(/\r\n/g, '\r').replace(/\n/g, '\r');
+        var bracketed = false;
+        try { bracketed = !!term.modes.bracketedPasteMode; } catch (e) { }
+        var i = 0;
+        (function step() {
+            var end = Math.min(i + PASTE_CHUNK, t.length);
+            var c = t.charCodeAt(end - 1);
+            if (end < t.length && c >= 0xD800 && c <= 0xDBFF) end++;
+            var chunk = t.slice(i, end);
+            sendInput(bracketed ? '\x1b[200~' + chunk + '\x1b[201~' : chunk);
+            i = end;
+            if (i < t.length) setTimeout(step, PASTE_DELAY);
+        })();
+    }
     function promptPaste() {
         var t = window.prompt('Paste text:');
-        if (t) term.paste(t);
+        if (t) pasteText(t);
     }
     function doPaste() {
         if (navigator.clipboard && navigator.clipboard.readText) {
             navigator.clipboard.readText().then(
-                function (t) { if (t) term.paste(t); term.focus(); },
+                function (t) { if (t) pasteText(t); term.focus(); },
                 function () { promptPaste(); }
             );
         } else {
@@ -365,6 +431,15 @@ html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hi
     }, { capture: true, passive: true });
     termEl.addEventListener('touchcancel', function () { tY = null; }, { capture: true, passive: true });
 
+    /* Ctrl+V / long-press paste land here as DOM paste events — route them
+       through the same chunked sender as the Paste button */
+    termEl.addEventListener('paste', function (e) {
+        if (!e.clipboardData) return;
+        e.preventDefault();
+        e.stopPropagation();
+        pasteText(e.clipboardData.getData('text'));
+    }, { capture: true });
+
     /* create a session via the psmux command prompt (prefix+: opens it, \r runs it) */
     function newSession() {
         var name = window.prompt('New session name (blank = auto):');
@@ -398,6 +473,9 @@ html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hi
             { label: 'Ren Sess', seq: P + '$', title: 'Rename session (type name, Enter)' },
             { label: 'Cmd :', seq: P + ':', title: 'psmux command prompt' },
             { label: 'Scroll', seq: P + '[', title: 'Copy/scroll mode (q to exit)' },
+            /* opens a throwaway window, runs copybuf.ps1 (prints the yank buffer
+               in markers we catch upstream), and closes it again */
+            { label: 'Copy buf', seq: P + 'c' + 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\\Users\\admin\\web-terminal\\copybuf.ps1; exit\r', title: 'Copy the psmux yank buffer to this device clipboard' },
             { label: 'A−', action: fontDown, title: 'Smaller font' },
             { label: 'A+', action: fontUp, title: 'Larger font' }
         ],

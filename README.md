@@ -94,6 +94,7 @@ The page (`ttyd-index.html` / `ttyd-index-screen.html`) is a single self-contain
 | `Esc` `Tab` `^C` `^A` `⏎` arrows | The keys mobile keyboards don't have |
 | `Ctrl` | **Sticky Ctrl**: tap it, then tap any letter → Ctrl+letter |
 | `Copy` `Paste` | Clipboard in and out of the terminal |
+| `Copy buf` | Copy psmux's yank buffer (from Scroll-mode `y`) to the device clipboard *(psmux only)* |
 | `⌨` | Reopen the mobile keyboard |
 
 Buttons send raw byte sequences (e.g. `Ctrl+B c` for a new psmux window) straight down the websocket — no extra server, no key simulation.
@@ -117,12 +118,20 @@ sequenceDiagram
 
 Mouse wheel, touch drag, and fling all work, with **20,000 lines** of history. If an app like `vim` or `htop` grabs the mouse itself (Linux), the wheel is passed through to it instead.
 
+### 📋 Big copy & paste
+
+Two Windows quirks get worked around so large text moves reliably:
+
+- **Paste** is sent as 512-byte mini-pastes, 40 ms apart — a single big burst gets silently discarded past a few KB (and far sooner through Cloudflare). Measured lossless at 20 KB+.
+- **Copy** of psmux's yank buffer can't use the standard OSC52 clipboard escape (Win10 ConPTY destroys it), so `Copy buf` runs `copybuf.ps1` in a throwaway window: it prints the buffer base64-wrapped in markers, the page fishes it out of the stream and writes your device clipboard. Flow: `Scroll` → `Space` → move → `y` → `Copy buf`.
+
 ## 🗂️ What's in the repo
 
 | File | What it is |
 |---|---|
 | `start_web_terminal.ps1` | 🪟 launcher: keep-alive loop, env-var hygiene, psmux session |
 | `attach-web.ps1` | 🪟 per-connection attach: lands on your last-used session |
+| `copybuf.ps1` | 🪟 bridges psmux's yank buffer to the browser clipboard |
 | `watchdog_web_terminal.ps1` + `run-*-hidden.vbs` | 🪟 self-healing scheduled-task pieces |
 | `linux/start-web-terminal.sh` | 🐧 launcher: keep-alive loop, env-var hygiene |
 | `linux/attach-main.sh` | 🐧 per-connection attach (creates session if missing) |
